@@ -1,0 +1,237 @@
+<!--
+  =============================================================================
+   @file panel.html
+   @brief Dashboard Web Modular - Cava de Crianza en Barricas
+   @author María Cristina Maza
+   @date 2026-10-11
+   @stack HTML5, CSS3, Vanilla JS Modular, Firebase SDK 10.x (WebSockets/onValue)
+   @description Interfaz de visualización en tiempo real y control manual bajo
+                el principio estricto de Acknowledge (confirmación física de hardware).
+  =============================================================================
+-->
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskMind AIoT - Cava de Crianza en Barricas</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e24;
+            --primary: #722f37; /* Color Vino / Borgoña */
+            --accent: #d4af37;  /* Color Oro / Cava */
+            --text-color: #e0e0e0;
+            --success: #2e7d32;
+            --danger: #c62828;
+            --warning: #f57f17;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 10px;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        h1 { margin: 0; color: var(--accent); font-size: 1.8rem; }
+        p.subtitle { margin: 5px 0 0; color: #a0a0a0; font-size: 0.95rem; }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border: 1px solid #333;
+            text-align: center;
+        }
+
+        .card-title {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 2.8rem;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .unit { font-size: 1.2rem; color: var(--accent); }
+
+        /* Indicador de Acknowledge de Hardware */
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-top: 10px;
+            text-transform: uppercase;
+        }
+
+        .status-off { background-color: #333; color: #888; }
+        .status-on { background-color: var(--success); color: #fff; box-shadow: 0 0 10px var(--success); }
+
+        /* Panel de Informe Enológico (AI) */
+        .ai-panel {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #2a1b20 0%, #1e1e24 100%);
+            border-left: 4px solid var(--accent);
+            text-align: left;
+        }
+
+        .ai-title { color: var(--accent); font-weight: bold; margin-bottom: 10px; }
+        .ai-content { font-size: 0.95rem; line-height: 1.5; color: #ccc; }
+
+        .btn-control {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .btn-control:hover { background-color: #8b3a44; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🍷 Control Microclimático — Cava de Crianza</h1>
+        <p class="subtitle">Monitoreo Perimetral Reactivo & Supervisión Cognitiva AIoT</p>
+    </header>
+
+    <div class="dashboard-grid">
+        
+        <!-- Tarjeta 1: Temperatura -->
+        <div class="card">
+            <div class="card-title">Temperatura Ambiente</div>
+            <div class="metric-value" id="val-temp">-- <span class="unit">°C</span></div>
+            <small style="color: #666;">Ventana: 12.0 °C - 18.0 °C</small>
+        </div>
+
+        <!-- Tarjeta 2: Humedad Relativa -->
+        <div class="card">
+            <div class="card-title">Humedad Relativa</div>
+            <div class="metric-value" id="val-hum">-- <span class="unit">%</span></div>
+            <small style="color: #666;">Ventana: 65.0 % - 80.0 %</small>
+        </div>
+
+        <!-- Tarjeta 3: Estado de Climatización (Principio de Acknowledge) -->
+        <div class="card">
+            <div class="card-title">Extractor / Climatización</div>
+            <div id="badge-hardware" class="status-badge status-off">HARDWARE DESCONECTADO</div>
+            <p style="font-size: 0.75rem; color: #aaa; margin-top: 8px;" id="txt-ack">Esperando Acknowledge del ESP32...</p>
+            <button class="btn-control" id="btn-toggle">Forzar Climatización (Manual)</button>
+        </div>
+
+        <!-- Tarjeta 4: Informe Enológico Autónomo de Gemini -->
+        <div class="card ai-panel">
+            <div class="ai-title">🤖 Diagnóstico Enológico Autónomo (Gemini AI)</div>
+            <div class="ai-content" id="ai-report">
+                <em>Monitoreando condiciones de la cava... Sin alertas críticas registradas.</em>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- SDK de Firebase 10.x Versión Modular -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Configuración de tu base de datos Firebase Realtime
+        const firebaseConfig = {
+            databaseURL: "https://iot-ies9010-telemetria-6c692-default-rtdb.firebaseio.com/"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // Nodos de referencia NoSQL
+        const refAmbiente = ref(db, "bodega/zona_crianza/ambiente");
+        const refAck = ref(db, "bodega/zona_crianza/extractor_confirmado");
+        const refControl = ref(db, "bodega/zona_crianza/control/forzar_climatizacion");
+        const refInforme = ref(db, "bodega/zona_crianza/informe_enologico");
+
+        let estadoControlActual = false;
+
+        // 1. ESCUCHA REACTIVA DE TELEMETRÍA (WebSockets - Cero Polling)
+        onValue(refAmbiente, (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                document.getElementById("val-temp").innerHTML = `${data.temperatura ? data.temperatura.toFixed(1) : '--'} <span class="unit">°C</span>`;
+                document.getElementById("val-hum").innerHTML = `${data.humedad ? data.humedad.toFixed(1) : '--'} <span class="unit">%</span>`;
+            }
+        });
+
+        // 2. ESCUCHA DE ACKNOWLEDGE STRICTO (Confirmación física desde el ESP32)
+        onValue(refAck, (snapshot) => {
+            const confirmado = snapshot.val();
+            const badge = document.getElementById("badge-hardware");
+            const txtAck = document.getElementById("txt-ack");
+
+            if (confirmado === true) {
+                badge.className = "status-badge status-on";
+                badge.innerText = "CLIMATIZADOR ACTIVO (ACK OK)";
+                txtAck.innerText = "Confirmación física recibida desde GPIO 2";
+            } else {
+                badge.className = "status-badge status-off";
+                badge.innerText = "CLIMATIZADOR INACTIVO";
+                txtAck.innerText = "Hardware en estado seguro (Apagado)";
+            }
+        });
+
+        // 3. ESCUCHA DEL INFORME ENOLÓGICO DE GEMINI
+        onValue(refInforme, (snapshot) => {
+            const informe = snapshot.val();
+            const container = document.getElementById("ai-report");
+            
+            if (informe && typeof informe === 'object') {
+                container.innerHTML = `
+                    <strong>Riesgo:</strong> ${informe.alerta_calidad || 'Sin alertas'}<br>
+                    <strong>Impacto Enológico:</strong> ${informe.impacto_enologico || 'N/A'}<br>
+                    <strong>Acción Cognitiva:</strong> ${informe.forzar_climatizacion ? 'Forzando mitigación térmica.' : 'Condiciones estables.'}
+                `;
+            }
+        });
+
+        // 4. CONTROL MANUAL DE OVERRIDE
+        document.getElementById("btn-toggle").addEventListener("click", () => {
+            estadoControlActual = !estadoControlActual;
+            set(refControl, estadoControlActual);
+        });
+    </script>
+</body>
+</html>

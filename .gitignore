@@ -1,0 +1,38 @@
+# ==========================================
+# 01_FIRMWARE (PlatformIO / C++)
+# ==========================================
+# Excluir binarios compilados y temporales del microcontrolador
+01_firmware/.pio/
+01_firmware/.vscode/
+
+# Archivos de caché del analizador de C/C++
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# ==========================================
+# 03_SUPERVISOR_AIOT (Python / Backend)
+# ==========================================
+# Excluir credenciales y claves de seguridad
+03_supervisor_aiot/backend/secrets/
+03_supervisor_aiot/backend/.env
+
+# Entornos virtuales de Python y temporales
+03_supervisor_aiot/__pycache__/
+03_supervisor_aiot/venv/
+03_supervisor_aiot/.env
+
+# ==========================================
+# SISTEMA OPERATIVO Y EDITORES
+# ==========================================
+.DS_Store
+Thumbs.db
+*.code-workspace
+
+# Credenciales y claves de API
+**/secrets/
+**/.env
+**/serviceAccountKey.json
+*gemini*.json
+*api_key*
