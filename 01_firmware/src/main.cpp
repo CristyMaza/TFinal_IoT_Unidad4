@@ -22,9 +22,8 @@ const char *password = "";
 // --- Endpoints de Firebase (Ruta del Trabajo Final) ---
 const String RTDB_URL = "https://iot-ies9010-telemetria-6c692-default-rtdb.firebaseio.com/bodega/zona_crianza";
 const String TELEMETRIA_PATH = RTDB_URL + "/ambiente.json";
-// Firebase RTDB soporta streaming SSE añadiendo .json?print=silent o mediante streams dedicados
-const String STREAM_CONTROL_PATH = RTDB_URL + "/control/forzar_climatizacion.json";
-const String ACK_PATH = RTDB_URL + "/extractor_confirmado.json";
+const String STREAM_CONTROL_PATH = RTDB_URL + "/control.json";
+const String ACK_PATH = RTDB_URL + "/control/extractor_confirmado.json";
 
 // --- Asignación de Hardware ---
 #define DHTPIN 4
@@ -79,22 +78,35 @@ void enviarTelemetria()
   }
 }
 
-// Función auxiliar para enviar el Acknowledge físico (Lazo Cerrado)
+// Función auxiliar optimizada para enviar el Acknowledge físico (Lazo Cerrado)
 void enviarAcknowledge(bool estadoFisico)
 {
-  WiFiClientSecure client;
-  client.setInsecure();
+  WiFiClientSecure ackClient;
+  ackClient.setInsecure();
   HTTPClient httpsAck;
 
-  if (httpsAck.begin(client, ACK_PATH))
+  Serial.println("[ACK] Intentando despachar confirmación de hardware a Firebase...");
+
+  if (httpsAck.begin(ackClient, ACK_PATH))
   {
     httpsAck.addHeader("Content-Type", "application/json");
-    int ackCode = httpsAck.PUT(estadoFisico ? "true" : "false");
+    
+    String payloadAck = estadoFisico ? "true" : "false";
+    
+    int ackCode = httpsAck.PUT(payloadAck);
     if (ackCode > 0)
     {
-      Serial.println("[ACK] Confirmación de hardware sincronizada con éxito en Firebase.");
+      Serial.printf("[ACK SUCCESS] Código HTTP: %d | Estado enviado: %s\n", ackCode, payloadAck.c_str());
+    }
+    else
+    {
+      Serial.printf("[HTTP ERROR] Falló el envío de ACK: %s\n", httpsAck.errorToString(ackCode).c_str());
     }
     httpsAck.end();
+  }
+  else
+  {
+    Serial.println("[ACK ERROR] No se pudo inicializar la conexión HTTPS para el ACK.");
   }
 }
 
@@ -106,7 +118,6 @@ void iniciarStreamingControl()
   
   if (httpStream.begin(secureClient, STREAM_CONTROL_PATH))
   {
-    // Cabecera obligatoria para solicitar Server-Sent Events (Streaming en tiempo real)
     httpStream.addHeader("Accept", "text/event-stream");
     int httpCode = httpStream.GET();
     
@@ -124,30 +135,63 @@ void iniciarStreamingControl()
 // Tarea 2: Procesamiento del Stream de Eventos (Recepción Reactiva Cloud ➔ Edge)
 void escucharEventosStreaming()
 {
-  // Verificamos si hay datos disponibles en el flujo continuo de la conexión abierta
   if (httpStream.connected() && secureClient.available())
   {
     String line = httpStream.getStreamPtr()->readStringUntil('\n');
     
-    // Firebase Realtime Database envía eventos SSE con el prefijo "data: "
     if (line.startsWith("data:"))
     {
       String jsonData = line.substring(5);
       jsonData.trim();
 
-      // Si el valor recibido no es nulo, evaluamos la orden
       if (jsonData != "null" && jsonData.length() > 0)
       {
-        bool ordenEncendido = (jsonData == "true");
+        bool ordenEncendido = false;
+        bool ordenValida = false;
 
-        // Actuamos únicamente si hay un cambio real respecto al estado actual
-        if (ordenEncendido != lastKnownState)
+        // Parsear el objeto contenedor del nodo /control.json
+        StaticJsonDocument<256> doc;
+        DeserializationError error = deserializeJson(doc, jsonData);
+
+        if (!error && doc.containsKey("data"))
+        {
+          JsonVariant dataVar = doc["data"];
+          
+          // Caso A: Si "data" es un objeto (contiene las sub-claves del control)
+          if (dataVar.is<JsonObject>())
+          {
+            JsonObject dataObj = dataVar.as<JsonObject>();
+            if (dataObj.containsKey("forzar_climatizacion"))
+            {
+              ordenEncendido = dataObj["forzar_climatizacion"].as<bool>();
+              ordenValida = true;
+            }
+          }
+          // Caso B: Si Firebase envía directamente un booleano en data
+          else if (dataVar.is<bool>())
+          {
+            ordenEncendido = dataVar.as<bool>();
+            ordenValida = true;
+          }
+        }
+        else
+        {
+          // Fallback por si el stream devolvió texto plano directo
+          if (jsonData == "true" || jsonData == "false")
+          {
+            ordenEncendido = (jsonData == "true");
+            ordenValida = true;
+          }
+        }
+
+        // Solo actuamos si la orden es válida y hay un cambio de estado real
+        if (ordenValida && (ordenEncendido != lastKnownState))
         {
           lastKnownState = ordenEncendido;
           digitalWrite(RELAY_PIN, ordenEncendido ? HIGH : LOW);
           Serial.printf("[EVENTO PUSH] Actuador GPIO 2 conmutado a: %s\n", ordenEncendido ? "HIGH (ENCENDIDO)" : "LOW (APAGADO)");
 
-          // Despachar inmediatamente el Acknowledge exigido por la rúbrica
+          // Despachar inmediatamente la confirmación (Acknowledge) a Firebase
           enviarAcknowledge(ordenEncendido);
         }
       }
@@ -155,7 +199,6 @@ void escucharEventosStreaming()
   }
   else
   {
-    // Si la conexión de streaming se interrumpe por timeout de la red, la reiniciamos de forma transparente
     Serial.println("[STREAMING] Reconectando canal de eventos...");
     httpStream.end();
     iniciarStreamingControl();
@@ -167,7 +210,6 @@ void setup()
 {
   Serial.begin(115200);
 
-  // Configuración del pin del actuador (LED onboard / Relé)
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
@@ -184,7 +226,6 @@ void setup()
   Serial.print("[RED] Dirección IP asignada: ");
   Serial.println(WiFi.localIP());
 
-  // Iniciar el canal de streaming persistente de eventos
   iniciarStreamingControl();
 }
 
@@ -192,13 +233,11 @@ void loop()
 {
   unsigned long currentMillis = millis();
 
-  // Ciclo 1: Ingesta periódica de telemetría cada 5 segundos (PATCH)
   if (currentMillis - lastTelemetryTime >= telemetryInterval)
   {
     lastTelemetryTime = currentMillis;
     enviarTelemetria();
   }
 
-  // Ciclo 2: Escucha permanente del stream de eventos (Cero polling, reactivo por eventos)
   escucharEventosStreaming();
 }
