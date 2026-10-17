@@ -1,12 +1,12 @@
 """
 ===============================================================================
- @file main.py
+ @file supervisor_cava.py
  @brief Supervisor Centinela AIoT - Cava de Crianza en Barricas
  @author María Cristina Maza
  @date 2026-10-11
- @stack Python, Firebase Admin SDK, Google GenAI (Gemini SDK)
- @description Listener reactivo de Firebase RTDB para auditoría continua del microclima
-              y generación de informes estructurados en JSON con IA para mitigación autónoma.
+ @stack Python 3, Firebase Admin SDK, Google GenAI (Gemini SDK)
+ @description Monitoreo continuo del microclima e invoca a Gemini para la mitigación
+              autónoma de contingencias microclimáticas en barricas.
 ===============================================================================
 """
 
@@ -18,32 +18,26 @@ from firebase_admin import credentials, db
 from google import genai
 from dotenv import load_dotenv
 
-# 0. Carga de variables de entorno locales (lee el archivo .env oculto)
+# Carga de variables de entorno
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# 1. CONFIGURACIÓN DE CREDENCIALES Y SERVICIOS
-# ---------------------------------------------------------------------------
-# La clave no está hardcodeada; se inyecta de forma segura desde el entorno
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 if not GEMINI_API_KEY:
-    raise ValueError("¡Error de configuración! No se encontró la GEMINI_API_KEY en el entorno local.")
+    raise ValueError("¡Error de configuración! No se encontró GEMINI_API_KEY en el entorno.")
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 PATH_CRED = os.path.join(os.path.dirname(__file__), "secrets", "serviceAccountKey.json")
-
 cred = credentials.Certificate(PATH_CRED)
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://iot-ies9010-telemetria-6c692-default-rtdb.firebaseio.com/'
 })
 
 # ---------------------------------------------------------------------------
-# 2. CAPA COGNITIVA: ASISTENTE ENOLÓGICO CON SALIDA JSON ESTRUCTURADA
+# CAPA COGNITIVA CON GEMINI 3.8 FLASH
 # ---------------------------------------------------------------------------
 async def evaluar_microclima_cava(temperatura: float, humedad: float):
-    print(f"\n[SUPERVISIÓN COGNITIVA] Evaluando microclima de Cava: {temperatura} °C | {humedad} % HR...")
+    print(f"\n[SUPERVISIÓN COGNITIVA] Evaluando microclima: {temperatura} °C | {humedad} % HR...")
 
     prompt = f"""
     Eres el Sommelier Cognitivo y Agente de Control Microclimático para la Cava de Crianza en Barricas.
@@ -56,25 +50,26 @@ async def evaluar_microclima_cava(temperatura: float, humedad: float):
     - Temperatura: {temperatura} °C
     - Humedad: {humedad} %
 
-    Devuelve EXCLUSIVAMENTE un objeto JSON con la siguiente estructura (sin formato Markdown adicional):
+    Devuelve EXCLUSIVAMENTE un objeto JSON estricto con las siguientes tres claves (sin formato Markdown adicional):
     {{
-      "alerta_calidad": "DESCRIPCIÓN_BREVE_DEL_RIESGO",
-      "forzar_climatizacion": true_o_false,
-      "impacto_enologico": "EXPLICACIÓN_TÉCNICA_DEL_IMPACTO_EN_LAS_BARRICAS"
+      "alerta_calidad": true,
+      "forzar_climatizacion": true,
+      "impacto_enologico": "Explicación técnica en una sola frase del riesgo para el vino y las duelas de madera de las barricas."
     }}
+    
+    Nota: 'alerta_calidad' y 'forzar_climatizacion' DEBEN ser valores booleanos (true o false).
     """
 
     max_intentos = 3
     for intento in range(1, max_intentos + 1):
         try:
-            print(f"[IA COGNITIVA] Consultando Gemini 3.8 Flash (Intento {intento}/{max_intentos})...")
+            print(f"[IA COGNITIVA] Consultando gemini-3.8-flash (Intento {intento}/{max_intentos})...")
             
             response = ai_client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=prompt
             )
 
-            # Limpieza del texto recibido para garantizar parsing JSON
             raw_text = response.text.replace("```json", "").replace("```", "").strip()
             dict_respuesta = json.loads(raw_text)
 
@@ -83,16 +78,17 @@ async def evaluar_microclima_cava(temperatura: float, humedad: float):
             print(json.dumps(dict_respuesta, indent=2, ensure_ascii=False))
             print("=" * 60)
 
-            # Inyectar mitigación autónoma en Firebase
             necesita_climatizacion = dict_respuesta.get("forzar_climatizacion", False)
             
-            ref_control = db.reference("bodega/zona_crianza/control/forzar_climatizacion")
-            ref_control.set(necesita_climatizacion)
+            # 1. Inyecta la orden en el actuador
+            ref_actuador = db.reference("bodega/zona_crianza/actuadores/extractor_estado")
+            ref_actuador.set(necesita_climatizacion)
             
-            ref_informe = db.reference("bodega/zona_crianza/informe_enologico")
-            ref_informe.set(dict_respuesta)
+            # 2. Registra el diagnóstico en auditoria_ia
+            ref_auditoria = db.reference("bodega/zona_crianza/auditoria_ia")
+            ref_auditoria.set(dict_respuesta)
 
-            print(f"[ACCION AUTÓNOMA] Mitigación actualizada en Firebase: forzar_climatizacion = {necesita_climatizacion}")
+            print(f"[ACCIÓN AUTÓNOMA] Sincronizado en Firebase: extractor_estado = {necesita_climatizacion}")
             break
 
         except Exception as e:
@@ -101,7 +97,7 @@ async def evaluar_microclima_cava(temperatura: float, humedad: float):
                 await asyncio.sleep(2)
 
 # ---------------------------------------------------------------------------
-# 3. LISTENER DE TELEMETRÍA DE LA BODEGA
+# LISTENER Y MITIGACIÓN EN TIEMPO REAL
 # ---------------------------------------------------------------------------
 def listener_cava(event):
     data = event.data
@@ -111,32 +107,30 @@ def listener_cava(event):
 
         print(f"[TELEMETRÍA CAVA] Temp: {temp} °C | Humedad: {hum} %")
 
-        # Disparo de contingencia fuera de ventana operativa:
+        # Disparador de Contingencia Enológica: T > 22.0 °C o HR < 60.0 %
         if temp > 22.0 or hum < 60.0:
-            print("[ALERTA OPERATIVA] Telemetría fuera de la ventana óptima de crianza.")
+            print("[ALERTA OPERATIVA] Salida de ventana operativa detectada.")
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(evaluar_microclima_cava(temp, hum))
             except RuntimeError:
                 asyncio.run(evaluar_microclima_cava(temp, hum))
-        elif temp <= 18.0 and hum >= 65.0:
-            # Normalización automática
-            print("[ESTADO ÓPTIMO] Cava dentro de rango. Desactivando climatización de contingencia...")
-            db.reference("bodega/zona_crianza/control/forzar_climatizacion").set(False)
+
+        # Restablecimiento al retornar a rango seguro (12 a 18 °C y 65 a 80 % HR)
+        elif 12.0 <= temp <= 18.0 and 65.0 <= hum <= 80.0:
+            print("[ESTADO ÓPTIMO] Retorno a rango seguro. Retirando orden de climatización...")
+            db.reference("bodega/zona_crianza/actuadores/extractor_estado").set(False)
             
             informe_normal = {
-                "alerta_calidad": "Sin desvíos (Microclima estable)",
+                "alerta_calidad": False,
                 "forzar_climatizacion": False,
                 "impacto_enologico": "Las barricas se encuentran en la ventana óptima de crianza. Evolución armónica."
             }
-            db.reference("bodega/zona_crianza/informe_enologico").set(informe_normal)
+            db.reference("bodega/zona_crianza/auditoria_ia").set(informe_normal)
 
-# ---------------------------------------------------------------------------
-# 4. PUNTO DE ENTRADA
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     print("------------------------------------------------------------------")
-    print("Iniciando Centinela Supervisor AIoT - Cava de Crianza en Barricas")
+    print("Iniciando Supervisor Cava AIoT (supervisor_cava.py)")
     print("Escuchando ruta: /bodega/zona_crianza/ambiente")
     print("------------------------------------------------------------------")
     

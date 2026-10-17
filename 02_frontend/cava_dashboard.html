@@ -179,11 +179,11 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // Nodos de referencia NoSQL
+        // Nodos de referencia NoSQL (Contrato oficial - Requerimiento 2)
         const refAmbiente = ref(db, "bodega/zona_crianza/ambiente");
         const refAck = ref(db, "bodega/zona_crianza/extractor_confirmado");
-        const refControl = ref(db, "bodega/zona_crianza/control/forzar_climatizacion");
-        const refInforme = ref(db, "bodega/zona_crianza/informe_enologico");
+        const refControl = ref(db, "bodega/zona_crianza/actuadores/extractor_estado");
+        const refInforme = ref(db, "bodega/zona_crianza/auditoria_ia");
 
         let estadoControlActual = false;
 
