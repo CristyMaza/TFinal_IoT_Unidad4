@@ -81,7 +81,7 @@ void enviarTelemetria()
   telemetryClient.stop(); // Forzar cierre explícito del socket TLS
 }
 
-// Función auxiliar para enviar el Acknowledge físico (Lazo Cerrado)
+// Función auxiliar optimizada para enviar el Acknowledge físico (Lazo Cerrado)
 void enviarAcknowledge(bool estadoFisico)
 {
   WiFiClientSecure ackClient;
@@ -92,10 +92,17 @@ void enviarAcknowledge(bool estadoFisico)
   if (httpsAck.begin(ackClient, ACK_PATH))
   {
     httpsAck.addHeader("Content-Type", "application/json");
-    int ackCode = httpsAck.PUT(estadoFisico ? "true" : "false");
+    
+    String payloadAck = estadoFisico ? "true" : "false";
+    
+    int ackCode = httpsAck.PUT(payloadAck);
     if (ackCode > 0)
     {
-      Serial.println("[ACK] Confirmación de hardware sincronizada con éxito en Firebase.");
+      Serial.printf("[ACK SUCCESS] Código HTTP: %d | Estado enviado: %s\n", ackCode, payloadAck.c_str());
+    }
+    else
+    {
+      Serial.printf("[HTTP ERROR] Falló el envío de ACK: %s\n", httpsAck.errorToString(ackCode).c_str());
     }
     httpsAck.end();
   }
@@ -195,7 +202,6 @@ void setup()
 {
   Serial.begin(115200);
 
-  // Configuración del pin del actuador (LED onboard / Relé)
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
@@ -212,7 +218,6 @@ void setup()
   Serial.print("[RED] Dirección IP asignada: ");
   Serial.println(WiFi.localIP());
 
-  // Iniciar el canal de streaming persistente de eventos
   iniciarStreamingControl();
 }
 
@@ -220,13 +225,11 @@ void loop()
 {
   unsigned long currentMillis = millis();
 
-  // Ciclo 1: Ingesta periódica de telemetría cada 5 segundos (PATCH)
   if (currentMillis - lastTelemetryTime >= telemetryInterval)
   {
     lastTelemetryTime = currentMillis;
     enviarTelemetria();
   }
 
-  // Ciclo 2: Escucha permanente del stream de eventos (Cero polling, reactivo por eventos)
   escucharEventosStreaming();
 }
